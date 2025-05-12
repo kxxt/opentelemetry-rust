@@ -51,8 +51,8 @@ with-serde = ["serde", "hex", "base64"]
 [dependencies]
 tonic = { workspace = true, optional = true, features = ["codegen", "prost"] }
 prost = { workspace = true, optional = true }
-opentelemetry = { version = "0.29", default-features = false, path = "../opentelemetry" }
-opentelemetry_sdk = { version = "0.29", default-features = false, path = "../opentelemetry-sdk" }
+opentelemetry = { version = "0.29", default-features = false }
+opentelemetry_sdk = { version = "0.29", default-features = false }
 schemars = { workspace = true, optional = true }
 serde = { workspace = true, optional = true, features = ["serde_derive"] }
 hex = { workspace = true, optional = true }
@@ -60,7 +60,7 @@ tracing = {workspace = true, optional = true} # optional for opentelemetry inter
 base64 = { workspace = true, optional = true }
 
 [dev-dependencies]
-opentelemetry = { features = ["testing"], path = "../opentelemetry" }
+opentelemetry = {  version = "0.29", features = ["testing"] }
 tonic-build = { workspace = true }
 prost-build = { workspace = true }
 tempfile = { workspace = true }

@@ -154,38 +154,70 @@ pub mod tonic {
         spans: Vec<SpanData>,
         resource: &ResourceAttributesWithSchema,
     ) -> Vec<ResourceSpans> {
-        // Group spans by their instrumentation scope
-        let scope_map = spans.iter().fold(
-            HashMap::new(),
-            |mut scope_map: HashMap<&opentelemetry::InstrumentationScope, Vec<&SpanData>>, span| {
+        let attributes = resource.attributes.0.clone();
+        let resource_name_idx = attributes
+            .iter()
+            .enumerate()
+            .find_map(|(i, v)| (v.key == "service.name").then_some(i))
+            .expect("The resource should have a name");
+        type ResourceAttrs = Vec<crate::tonic::common::v1::KeyValue>;
+        type ScopeMap<'a, 'b> = HashMap<&'a opentelemetry::InstrumentationScope, Vec<&'b SpanData>>;
+        // As a hack for locating the service name attribute and drop it,
+        // tracexec will store service.name at last.
+        let resource_map: HashMap<String, (ScopeMap, ResourceAttrs)> =
+            spans.iter().fold(HashMap::new(), |mut resource_map, span| {
+                let service_name = span
+                    .attributes
+                    .first()
+                    .expect("No attribute is found on span");
+                if service_name.key.as_str() != "service.name" {
+                    panic!("invalid span last attr is not service.name");
+                }
+                // Group spans by their resource
+                let scope_map = &mut resource_map
+                    .entry(service_name.value.to_string())
+                    .or_insert_with(|| {
+                        (HashMap::new(), {
+                            let mut attrs = attributes.clone();
+                            attrs[resource_name_idx] = crate::tonic::common::v1::KeyValue {
+                                key: service_name.key.to_string(),
+                                value: Some(service_name.value.clone().into()),
+                            };
+                            attrs
+                        })
+                    })
+                    .0;
+                // Group spans by their instrumentation scope
                 let instrumentation = &span.instrumentation_scope;
-                scope_map.entry(instrumentation).or_default().push(span);
-                scope_map
-            },
-        );
+                scope_map.entry(instrumentation).or_default().push(&span);
+                resource_map
+            });
 
-        // Convert the grouped spans into ScopeSpans
-        let scope_spans = scope_map
-            .into_iter()
-            .map(|(instrumentation, span_records)| ScopeSpans {
-                scope: Some((instrumentation, None).into()),
+        let resource_spans = resource_map.into_values().map(|(scope_map, attributes)| {
+            // Convert the grouped spans into ScopeSpans
+            let scope_spans = scope_map
+                .into_iter()
+                .map(|(instrumentation, span_records)| ScopeSpans {
+                    scope: Some((instrumentation, None).into()),
+                    schema_url: resource.schema_url.clone().unwrap_or_default(),
+                    spans: span_records
+                        .into_iter()
+                        .map(|span_data| span_data.clone().into())
+                        .collect(),
+                })
+                .collect();
+            ResourceSpans {
+                resource: Some(Resource {
+                    attributes: attributes,
+                    dropped_attributes_count: 0,
+                }),
+                scope_spans,
                 schema_url: resource.schema_url.clone().unwrap_or_default(),
-                spans: span_records
-                    .into_iter()
-                    .map(|span_data| span_data.clone().into())
-                    .collect(),
-            })
-            .collect();
+            }
+        });
 
         // Wrap ScopeSpans into a single ResourceSpans
-        vec![ResourceSpans {
-            resource: Some(Resource {
-                attributes: resource.attributes.0.clone(),
-                dropped_attributes_count: 0,
-            }),
-            scope_spans,
-            schema_url: resource.schema_url.clone().unwrap_or_default(),
-        }]
+        resource_spans.collect()
     }
 }
 
